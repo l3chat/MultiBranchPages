@@ -105,6 +105,544 @@ jobs:
         
       # Step 3: Determine deployment strategy based on branch
       - name: Determine deployment path and URL
+        id: deploy-info
+        run: |
+          echo "Current branch: ${{ github.ref_name }}"
+          
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "Deploy main branch to root"
+            echo "deploy_path=." >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+          else
+            echo "Deploy ${{ github.ref_name }} branch to subdirectory"
+            echo "deploy_path=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Step 4: Create proper directory structure
+      - name: Prepare deployment files
+        run: |
+          echo "Preparing files for deployment..."
+          
+          # Create deployment directory
+          mkdir -p deployment_temp
+          
+          if [[ "${{ steps.deploy-info.outputs.is_main }}" == "true" ]]; then
+            echo "Setting up main branch deployment"
+            # For main branch, copy all files to root
+            cp -r * deployment_temp/ 2>/dev/null || true
+            # Remove deployment_temp from itself to avoid recursion
+            rm -rf deployment_temp/deployment_temp 2>/dev/null || true
+            # Remove .github directory 
+            rm -rf deployment_temp/.github 2>/dev/null || true
+          else
+            echo "Setting up ${{ github.ref_name }} branch deployment"
+            # For other branches, create subdirectory structure
+            mkdir -p deployment_temp/${{ github.ref_name }}
+            cp -r * deployment_temp/${{ github.ref_name }}/ 2>/dev/null || true
+            # Clean up nested directories
+            rm -rf deployment_temp/${{ github.ref_name }}/deployment_temp 2>/dev/null || true
+            rm -rf deployment_temp/${{ github.ref_name }}/.github 2>/dev/null || true
+            
+            # Create a simple index.html at root for navigation
+            cat > deployment_temp/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Branch Deployments</title>
+              <style>
+                  body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                  .branch { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+                  a { color: #0366d6; text-decoration: none; }
+                  a:hover { text-decoration: underline; }
+              </style>
+          </head>
+          <body>
+              <h1>Available Branch Deployments</h1>
+              <div class="branch">
+                  <h3>Development Branches</h3>
+                  <p><a href="./dev/">Dev Branch</a> - Development environment</p>
+                  <p><a href="./test/">Test Branch</a> - Testing environment</p>
+              </div>
+              <p><em>Note: This page appears when non-main branches are deployed.</em></p>
+          </body>
+          </html>
+          EOF
+          fi
+          
+          # List the structure for debugging
+          echo "Deployment structure:"
+          ls -la deployment_temp/
+          
+      # Step 5: Upload files to GitHub Pages
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./deployment_temp
+          
+      # Step 6: Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # Notification job
+  notify-deployment:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Post-deployment notification
+        run: |
+          echo "=== Deployment Summary ==="
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Status: ${{ needs.build-and-deploy.result }}"
+          echo "Repository: ${{ github.repository }}"
+          
+          if [[ "${{ needs.build-and-deploy.result }}" == "success" ]]; then
+            if [[ "${{ github.ref_name }}" == "main" ]]; then
+              echo "🚀 Main branch successfully deployed!"
+              echo "URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+            else
+              echo "🚀 ${{ github.ref_name }} branch successfully deployed!"
+              echo "URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ github.ref_name }}/"
+            fi
+          else
+            echo "❌ Deployment failed for ${{ github.ref_name }} branch"
+            echo "Check the workflow logs for details"
+          fi
+```
+
+### Step 4: Configure Workflow File
+
+1. In the file name field at the top, change `main.yml` to `deploy.yml`
+2. Review the workflow code you just pasted
+3. Make sure all the code is properly formatted (GitHub will show syntax highlighting)
+
+### Step 5: Commit the Workflow
+
+1. Scroll down to the **Commit new file** section
+2. In the commit message field, enter: `Add GitHub Pages deployment workflow`
+3. In the description field (optional), enter: `Automated deployment for main, dev, and test branches`
+4. Select **Commit directly to the main branch**
+5. Click **Commit new file**
+
+## Part 4: Test the Deployment (Web Interface)
+
+### Step 1: Verify Workflow Creation
+
+1. After committing, you'll be redirected to the Actions tab
+2. You should see your new workflow listed as **Deploy Multi-Branch to GitHub Pages**
+3. The workflow should start running automatically (since you just pushed to main)
+
+### Step 2: Monitor First Deployment
+
+1. Click on the running workflow to view its progress
+2. You'll see the job **build-and-deploy** running
+3. Click on the job to see detailed logs
+4. Wait for it to complete (should take 1-3 minutes)
+
+### Step 3: Check GitHub Pages Deployment
+
+1. Go to **Settings** > **Pages**
+2. You should see a green checkmark and your site URL
+3. Click on **Visit site** to view your deployed main branch
+
+### Step 4: Test Branch Deployments
+
+1. Navigate to your **dev** branch:
+   - Click on the branch dropdown (usually shows "main")
+   - Select **dev** branch
+
+2. Make a small change to trigger deployment:
+   - Click on any HTML file (e.g., `index.html`)
+   - Click the **Edit** button (pencil icon)
+   - Add a comment or change some text
+   - Scroll down and commit the change
+
+3. Go to **Actions** tab to see the new workflow running for the dev branch
+
+4. Once complete, visit your site URL with `/dev/` added to test the dev deployment
+
+## Part 5: Understanding Your Deployment URLs
+
+After successful setup, your branches will be accessible at:
+
+- **Main branch**: `https://yourusername.github.io/yourrepo/`
+- **Dev branch**: `https://yourusername.github.io/yourrepo/dev/`
+- **Test branch**: `https://yourusername.github.io/yourrepo/test/`
+
+## Part 6: Managing Deployments (Web Interface)
+
+### Viewing Deployment History
+
+1. **Actions Tab**: See all workflow runs and their status
+2. **Settings > Pages**: View current deployment status and URL
+3. **Environments**: Go to repository main page, click **Environments** to see deployment history
+
+### Manual Triggering
+
+1. Go to **Actions** tab
+2. Click on **Deploy Multi-Branch to GitHub Pages** workflow
+3. Click **Run workflow** button
+4. Select the branch you want to deploy
+5. Click **Run workflow**
+
+### Monitoring and Troubleshooting
+
+1. **Check Workflow Logs**:
+   - Actions tab > Click on workflow run > Click on job name
+   - Review step-by-step logs for errors
+
+2. **Common Issues**:
+   - **Permission errors**: Verify Actions permissions in Settings > Actions
+   - **Pages not enabled**: Check Settings > Pages configuration
+   - **File not found**: Ensure your HTML files exist in the branch
+
+## Part 7: Advanced Configuration Options
+
+### Adding Environment Variables
+
+1. Go to **Settings** > **Secrets and variables** > **Actions**
+2. Click **New repository secret**
+3. Add secrets that your workflow can use
+
+### Branch Protection Rules
+
+1. Go to **Settings** > **Branches**
+2. Click **Add rule**
+3. Configure protection for your main branch
+
+### Custom Domain (Optional)
+
+1. Go to **Settings** > **Pages**
+2. Under **Custom domain**, enter your domain
+3. Configure DNS settings as instructed
+
+## Troubleshooting Common Issues
+
+### Issue 1: Workflow Not Running
+**Solution**: Check that GitHub Actions is enabled in Settings > Actions
+
+### Issue 2: Permission Denied
+**Solution**: Verify workflow permissions are set to "Read and write permissions"
+
+### Issue 3: Pages Not Updating
+**Solution**: Check that source is set to "GitHub Actions" in Settings > Pages
+
+### Issue 4: 404 Error on Branch URLs
+**Solution**: Ensure the branch has been pushed to and the workflow completed successfully
+
+## Security Best Practices
+
+1. **Review Permissions**: Only grant necessary permissions to workflows
+2. **Protect Main Branch**: Use branch protection rules for production deployments  
+3. **Monitor Activity**: Regularly check Actions logs for unusual activity
+4. **Keep Actions Updated**: GitHub will notify about action updates
+
+This completes your GitHub Pages multi-branch deployment setup using only the web interface!on:
+  push:
+    branches: [ main, dev, test ]
+  # Allow manual triggering from Actions tab
+  workflow_dispatch:
+
+# Set permissions for the workflow
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Prevent concurrent deployments
+concurrency:
+  group: "pages-${{ github.ref_name }}"
+  cancel-in-progress: false
+
+jobs:
+  # Build and deploy job
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    # Set up GitHub Pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      # Step 1: Download repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        
+      # Step 2: Configure GitHub Pages
+      - name: Setup Pages configuration
+        uses: actions/configure-pages@v4
+        
+      # Step 3: Determine deployment strategy based on branch
+      - name: Determine deployment path and URL
+        id: deploy-info
+        run: |
+          echo "Current branch: ${{ github.ref_name }}"
+          
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "Deploy main branch to root"
+            echo "deploy_path=." >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+          else
+            echo "Deploy ${{ github.ref_name }} branch to subdirectory"
+            echo "deploy_path=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Step 4: Create proper directory structure
+      - name: Prepare deployment files
+        run: |
+          echo "Preparing files for deployment..."
+          
+          # Create deployment directory
+          mkdir -p deployment_temp
+          
+          if [[ "${{ steps.deploy-info.outputs.is_main }}" == "true" ]]; then
+            echo "Setting up main branch deployment"
+            # For main branch, copy all files to root
+            cp -r * deployment_temp/ 2>/dev/null || true
+            # Remove deployment_temp from itself to avoid recursion
+            rm -rf deployment_temp/deployment_temp 2>/dev/null || true
+            # Remove .github directory 
+            rm -rf deployment_temp/.github 2>/dev/null || true
+          else
+            echo "Setting up ${{ github.ref_name }} branch deployment"
+            # For other branches, create subdirectory structure
+            mkdir -p deployment_temp/${{ github.ref_name }}
+            cp -r * deployment_temp/${{ github.ref_name }}/ 2>/dev/null || true
+            # Clean up nested directories
+            rm -rf deployment_temp/${{ github.ref_name }}/deployment_temp 2>/dev/null || true
+            rm -rf deployment_temp/${{ github.ref_name }}/.github 2>/dev/null || true
+            
+            # Create a simple index.html at root for navigation
+            cat > deployment_temp/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Branch Deployments</title>
+              <style>
+                  body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                  .branch { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+                  a { color: #0366d6; text-decoration: none; }
+                  a:hover { text-decoration: underline; }
+              </style>
+          </head>
+          <body>
+              <h1>Available Branch Deployments</h1>
+              <div class="branch">
+                  <h3>Development Branches</h3>
+                  <p><a href="./dev/">Dev Branch</a> - Development environment</p>
+                  <p><a href="./test/">Test Branch</a> - Testing environment</p>
+              </div>
+              <p><em>Note: This page appears when non-main branches are deployed.</em></p>
+          </body>
+          </html>
+          EOF
+          fi
+          
+          # List the structure for debugging
+          echo "Deployment structure:"
+          ls -la deployment_temp/
+          
+      # Step 5: Upload files to GitHub Pages
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./deployment_temp
+          
+      # Step 6: Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # Notification job
+  notify-deployment:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Post-deployment notification
+        run: |
+          echo "=== Deployment Summary ==="
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Status: ${{ needs.build-and-deploy.result }}"
+          echo "Repository: ${{ github.repository }}"
+          
+          if [[ "${{ needs.build-and-deploy.result }}" == "success" ]]; then
+            if [[ "${{ github.ref_name }}" == "main" ]]; then
+              echo "🚀 Main branch successfully deployed!"
+              echo "URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+            else
+              echo "🚀 ${{ github.ref_name }} branch successfully deployed!"
+              echo "URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ github.ref_name }}/"
+            fi
+          else
+            echo "❌ Deployment failed for ${{ github.ref_name }} branch"
+            echo "Check the workflow logs for details"
+          fi
+```
+
+### Step 4: Configure Workflow File
+
+1. In the file name field at the top, change `main.yml` to `deploy.yml`
+2. Review the workflow code you just pasted
+3. Make sure all the code is properly formatted (GitHub will show syntax highlighting)
+
+### Step 5: Commit the Workflow
+
+1. Scroll down to the **Commit new file** section
+2. In the commit message field, enter: `Add GitHub Pages deployment workflow`
+3. In the description field (optional), enter: `Automated deployment for main, dev, and test branches`
+4. Select **Commit directly to the main branch**
+5. Click **Commit new file**
+
+## Part 4: Test the Deployment (Web Interface)
+
+### Step 1: Verify Workflow Creation
+
+1. After committing, you'll be redirected to the Actions tab
+2. You should see your new workflow listed as **Deploy Multi-Branch to GitHub Pages**
+3. The workflow should start running automatically (since you just pushed to main)
+
+### Step 2: Monitor First Deployment
+
+1. Click on the running workflow to view its progress
+2. You'll see the job **build-and-deploy** running
+3. Click on the job to see detailed logs
+4. Wait for it to complete (should take 1-3 minutes)
+
+### Step 3: Check GitHub Pages Deployment
+
+1. Go to **Settings** > **Pages**
+2. You should see a green checkmark and your site URL
+3. Click on **Visit site** to view your deployed main branch
+
+### Step 4: Test Branch Deployments
+
+1. Navigate to your **dev** branch:
+   - Click on the branch dropdown (usually shows "main")
+   - Select **dev** branch
+
+2. Make a small change to trigger deployment:
+   - Click on any HTML file (e.g., `index.html`)
+   - Click the **Edit** button (pencil icon)
+   - Add a comment or change some text
+   - Scroll down and commit the change
+
+3. Go to **Actions** tab to see the new workflow running for the dev branch
+
+4. Once complete, visit your site URL with `/dev/` added to test the dev deployment
+
+## Part 5: Understanding Your Deployment URLs
+
+After successful setup, your branches will be accessible at:
+
+- **Main branch**: `https://yourusername.github.io/yourrepo/`
+- **Dev branch**: `https://yourusername.github.io/yourrepo/dev/`
+- **Test branch**: `https://yourusername.github.io/yourrepo/test/`
+
+## Part 6: Managing Deployments (Web Interface)
+
+### Viewing Deployment History
+
+1. **Actions Tab**: See all workflow runs and their status
+2. **Settings > Pages**: View current deployment status and URL
+3. **Environments**: Go to repository main page, click **Environments** to see deployment history
+
+### Manual Triggering
+
+1. Go to **Actions** tab
+2. Click on **Deploy Multi-Branch to GitHub Pages** workflow
+3. Click **Run workflow** button
+4. Select the branch you want to deploy
+5. Click **Run workflow**
+
+### Monitoring and Troubleshooting
+
+1. **Check Workflow Logs**:
+   - Actions tab > Click on workflow run > Click on job name
+   - Review step-by-step logs for errors
+
+2. **Common Issues**:
+   - **Permission errors**: Verify Actions permissions in Settings > Actions
+   - **Pages not enabled**: Check Settings > Pages configuration
+   - **File not found**: Ensure your HTML files exist in the branch
+
+## Part 7: Advanced Configuration Options
+
+### Adding Environment Variables
+
+1. Go to **Settings** > **Secrets and variables** > **Actions**
+2. Click **New repository secret**
+3. Add secrets that your workflow can use
+
+### Branch Protection Rules
+
+1. Go to **Settings** > **Branches**
+2. Click **Add rule**
+3. Configure protection for your main branch
+
+### Custom Domain (Optional)
+
+1. Go to **Settings** > **Pages**
+2. Under **Custom domain**, enter your domain
+3. Configure DNS settings as instructed
+
+## Troubleshooting Common Issues
+
+### Issue 1: Workflow Not Running
+**Solution**: Check that GitHub Actions is enabled in Settings > Actions
+
+### Issue 2: Permission Denied
+**Solution**: Verify workflow permissions are set to "Read and write permissions"
+
+### Issue 3: Pages Not Updating
+**Solution**: Check that source is set to "GitHub Actions" in Settings > Pages
+
+### Issue 4: 404 Error on Branch URLs
+**Solution**: Ensure the branch has been pushed to and the workflow completed successfully
+
+## Security Best Practices
+
+1. **Review Permissions**: Only grant necessary permissions to workflows
+2. **Protect Main Branch**: Use branch protection rules for production deployments  
+3. **Monitor Activity**: Regularly check Actions logs for unusual activity
+4. **Keep Actions Updated**: GitHub will notify about action updates
+
+This completes your GitHub Pages multi-branch deployment setup using only the web interface!
+jobs:
+  # Build and deploy job
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    # Set up GitHub Pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      # Step 1: Download repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        
+      # Step 2: Configure GitHub Pages
+      - name: Setup Pages configuration
+        uses: actions/configure-pages@v4
+        
+      # Step 3: Determine deployment strategy based on branch
+      - name: Determine deployment path and URL
         id: deployment-info
         run: |
           echo "Current branch: ${{ github.ref_name }}"
