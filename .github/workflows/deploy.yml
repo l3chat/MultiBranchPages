@@ -1,0 +1,151 @@
+name: Claude - Deploy Multi-Branch to GitHub Pages
+
+# Trigger the workflow on push to specified branches
+on:
+  push:
+    branches: [ "main", "dev", "test" ]
+  # Allow manual triggering from Actions tab
+  workflow_dispatch:
+
+# Set permissions for the workflow
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Prevent concurrent deployments
+concurrency:
+  group: "pages-${{ github.ref_name }}"
+  cancel-in-progress: false
+
+jobs:
+  # Build and deploy job
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    # Set up GitHub Pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      # Step 1: Download repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        
+      # Step 2: Configure GitHub Pages
+      - name: Setup Pages configuration
+        uses: actions/configure-pages@v4
+        
+      # Step 3: Determine deployment strategy based on branch
+      - name: Determine deployment path and URL
+        id: deploy-info
+        run: |
+          echo "Current branch: ${{ github.ref_name }}"
+          
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "Deploy main branch to root"
+            echo "deploy_path=." >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+          else
+            echo "Deploy ${{ github.ref_name }} branch to subdirectory"
+            echo "deploy_path=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Step 4: Create proper directory structure
+      - name: Prepare deployment files
+        run: |
+          echo "Preparing files for deployment..."
+          
+          # Create deployment directory
+          mkdir -p deployment_temp
+          
+          if [[ "${{ steps.deploy-info.outputs.is_main }}" == "true" ]]; then
+            echo "Setting up main branch deployment"
+            # For main branch, copy all files to root
+            cp -r * deployment_temp/ 2>/dev/null || true
+            # Remove deployment_temp from itself to avoid recursion
+            rm -rf deployment_temp/deployment_temp 2>/dev/null || true
+            # Remove .github directory 
+            rm -rf deployment_temp/.github 2>/dev/null || true
+          else
+            echo "Setting up ${{ github.ref_name }} branch deployment"
+            # For other branches, create subdirectory structure
+            mkdir -p deployment_temp/${{ github.ref_name }}
+            cp -r * deployment_temp/${{ github.ref_name }}/ 2>/dev/null || true
+            # Clean up nested directories
+            rm -rf deployment_temp/${{ github.ref_name }}/deployment_temp 2>/dev/null || true
+            rm -rf deployment_temp/${{ github.ref_name }}/.github 2>/dev/null || true
+            
+            # Create a simple index.html at root for navigation
+            cat > deployment_temp/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Branch Deployments</title>
+              <style>
+                  body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                  .branch { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+                  a { color: #0366d6; text-decoration: none; }
+                  a:hover { text-decoration: underline; }
+              </style>
+          </head>
+          <body>
+              <h1>Available Branch Deployments</h1>
+              <div class="branch">
+                  <h3>Development Branches</h3>
+                  <p><a href="./dev/">Dev Branch</a> - Development environment</p>
+                  <p><a href="./test/">Test Branch</a> - Testing environment</p>
+              </div>
+              <p><em>Note: This page appears when non-main branches are deployed.</em></p>
+          </body>
+          </html>
+          EOF
+          fi
+          
+          # List the structure for debugging
+          echo "Deployment structure:"
+          ls -la deployment_temp/
+          
+      # Step 5: Upload files to GitHub Pages
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./deployment_temp
+          
+      # Step 6: Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # Notification job
+  notify-deployment:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Deployment status notification
+        run: |
+          echo "=== Deployment Summary ==="
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Status: ${{ needs.build-and-deploy.result }}"
+          echo "Repository: ${{ github.repository }}"
+          
+          if [[ "${{ needs.build-and-deploy.result }}" == "success" ]]; then
+            if [[ "${{ github.ref_name }}" == "main" ]]; then
+              echo "🚀 Main branch successfully deployed!"
+              echo "URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+            else
+              echo "🚀 ${{ github.ref_name }} branch successfully deployed!"
+              echo "URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ github.ref_name }}/"
+            fi
+          else
+            echo "❌ Deployment failed for ${{ github.ref_name }} branch"
+            echo "Check the workflow logs for details"
+          fi
