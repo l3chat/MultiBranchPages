@@ -62,7 +62,7 @@ This comprehensive guide will walk you through setting up GitHub Pages with GitH
 2. Replace it with the following workflow code:
 
 ```yaml
-name: Deploy Multi-Branch to GitHub Pages
+name: Claude - Deploy Multi-Branch to GitHub Pages
 
 # Trigger the workflow on push to specified branches
 on:
