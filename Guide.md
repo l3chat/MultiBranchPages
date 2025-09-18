@@ -62,7 +62,7 @@ This comprehensive guide will walk you through setting up GitHub Pages with GitH
 2. Replace it with the following workflow code:
 
 ```yaml
-name: Claude - Deploy Multi-Branch to GitHub Pages
+name: Deploy Multi-Branch to GitHub Pages
 
 # Trigger the workflow on push to specified branches
 on:
@@ -124,63 +124,32 @@ jobs:
         run: |
           echo "Preparing files for deployment..."
           
-          # Create deployment directory
-          mkdir -p deployment_temp
-          
           if [[ "${{ steps.deploy-info.outputs.is_main }}" == "true" ]]; then
             echo "Setting up main branch deployment"
-            # For main branch, copy all files to root
-            cp -r * deployment_temp/ 2>/dev/null || true
-            # Remove deployment_temp from itself to avoid recursion
-            rm -rf deployment_temp/deployment_temp 2>/dev/null || true
-            # Remove .github directory 
-            rm -rf deployment_temp/.github 2>/dev/null || true
+            # For main branch, copy files directly
+            echo "Main branch - deploying to root"
+            ls -la
           else
             echo "Setting up ${{ github.ref_name }} branch deployment"
-            # For other branches, create subdirectory structure
-            mkdir -p deployment_temp/${{ github.ref_name }}
-            cp -r * deployment_temp/${{ github.ref_name }}/ 2>/dev/null || true
+            # For other branches, we need to check if this is the only branch being deployed
+            # Create branch-specific deployment
+            mkdir -p ${{ github.ref_name }}
+            cp -r * ${{ github.ref_name }}/ 2>/dev/null || true
             # Clean up nested directories
-            rm -rf deployment_temp/${{ github.ref_name }}/deployment_temp 2>/dev/null || true
-            rm -rf deployment_temp/${{ github.ref_name }}/.github 2>/dev/null || true
+            rm -rf ${{ github.ref_name }}/${{ github.ref_name }} 2>/dev/null || true
+            rm -rf ${{ github.ref_name }}/.github 2>/dev/null || true
+            rm -rf ${{ github.ref_name }}/deployment_temp 2>/dev/null || true
             
-            # Create a simple index.html at root for navigation
-            cat > deployment_temp/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Branch Deployments</title>
-              <style>
-                  body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-                  .branch { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
-                  a { color: #0366d6; text-decoration: none; }
-                  a:hover { text-decoration: underline; }
-              </style>
-          </head>
-          <body>
-              <h1>Available Branch Deployments</h1>
-              <div class="branch">
-                  <h3>Development Branches</h3>
-                  <p><a href="./dev/">Dev Branch</a> - Development environment</p>
-                  <p><a href="./test/">Test Branch</a> - Testing environment</p>
-              </div>
-              <p><em>Note: This page appears when non-main branches are deployed.</em></p>
-          </body>
-          </html>
-          EOF
+            echo "Branch deployment structure created"
+            ls -la
+            ls -la ${{ github.ref_name }}/
           fi
-          
-          # List the structure for debugging
-          echo "Deployment structure:"
-          ls -la deployment_temp/
           
       # Step 5: Upload files to GitHub Pages
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./deployment_temp
+          path: ${{ steps.deploy-info.outputs.is_main == 'true' && '.' || github.ref_name }}
           
       # Step 6: Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
@@ -194,7 +163,7 @@ jobs:
     if: always()
     
     steps:
-      - name: Post-deployment notification
+      - name: Deployment status notification
         run: |
           echo "=== Deployment Summary ==="
           echo "Branch: ${{ github.ref_name }}"
@@ -220,6 +189,7 @@ jobs:
 1. In the file name field at the top, change `main.yml` to `deploy.yml`
 2. Review the workflow code you just pasted
 3. Make sure all the code is properly formatted (GitHub will show syntax highlighting)
+4. **IMPORTANT**: Ensure the folder name is `.github` (with lowercase 'g'), not `.GitHub`
 
 ### Step 5: Commit the Workflow
 
@@ -229,7 +199,61 @@ jobs:
 4. Select **Commit directly to the main branch**
 5. Click **Commit new file**
 
-## Part 4: Test the Deployment (Web Interface)
+### Step 6: Copy Workflow to All Branches
+
+**CRITICAL**: The workflow file must exist in ALL branches to work properly. GitHub Actions only runs workflows that exist in the branch being pushed to.
+
+#### Method 1: Using Pull Requests (Recommended)
+
+**Copy to dev branch:**
+1. Stay in the main branch
+2. Click **"Contribute"** → **"Open pull request"**
+3. Set **base:** `dev` ← **compare:** `main`
+4. Add title: `Add workflow to dev branch`
+5. Click **"Create pull request"** → **"Merge pull request"**
+
+**Copy to test branch:**
+1. Repeat the above steps but set **base:** `test` ← **compare:** `main`
+
+#### Method 2: Manual Copy (Alternative)
+
+**For dev branch:**
+1. Switch to `dev` branch
+2. Create new file: `.github/workflows/deploy.yml`
+3. Copy the entire workflow code from main branch
+4. Commit the file
+
+**For test branch:**
+1. Switch to `test` branch  
+2. Create new file: `.github/workflows/deploy.yml`
+3. Copy the entire workflow code from main branch
+4. Commit the file
+
+## Part 4: Configure Environment Permissions
+
+### Step 1: Navigate to Environments
+
+1. Go to **Settings** tab of your repository
+2. In the left sidebar, find and click **"Environments"**
+3. You should see the **github-pages** environment (created automatically when using GitHub Pages)
+
+### Step 2: Configure Branch Access
+
+1. Click on the **"github-pages"** environment
+2. Under **"Deployment branches"**, you'll see a dropdown
+3. Change it from **"Protected branches only"** to **"Selected branches"**
+4. Click **"Add deployment branch rule"**
+5. Add the following branch patterns one by one:
+   - `main`
+   - `dev`  
+   - `test`
+
+### Step 3: Save Environment Settings
+
+1. After adding all three branch rules, the settings save automatically
+2. You should now see all three branches listed under "Deployment branches"
+
+## Part 5: Test the Deployment (Web Interface)
 
 ### Step 1: Verify Workflow Creation
 
@@ -252,21 +276,29 @@ jobs:
 
 ### Step 4: Test Branch Deployments
 
+**IMPORTANT**: Before testing dev/test branches, ensure the workflow file exists in those branches (see Part 3, Step 6).
+
 1. Navigate to your **dev** branch:
    - Click on the branch dropdown (usually shows "main")
    - Select **dev** branch
 
-2. Make a small change to trigger deployment:
+2. Verify the workflow file exists:
+   - Check that `.github/workflows/deploy.yml` exists in the dev branch
+   - If not, follow the instructions in Part 3, Step 6 to copy it
+
+3. Make a small change to trigger deployment:
    - Click on any HTML file (e.g., `index.html`)
    - Click the **Edit** button (pencil icon)
    - Add a comment or change some text
    - Scroll down and commit the change
 
-3. Go to **Actions** tab to see the new workflow running for the dev branch
+4. Go to **Actions** tab to see the new workflow running for the dev branch
 
-4. Once complete, visit your site URL with `/dev/` added to test the dev deployment
+5. Once complete, visit your site URL with `/dev/` added to test the dev deployment
 
-## Part 5: Understanding Your Deployment URLs
+6. Repeat for the **test** branch
+
+## Part 6: Understanding Your Deployment URLs
 
 After successful setup, your branches will be accessible at:
 
@@ -274,7 +306,7 @@ After successful setup, your branches will be accessible at:
 - **Dev branch**: `https://yourusername.github.io/yourrepo/dev/`
 - **Test branch**: `https://yourusername.github.io/yourrepo/test/`
 
-## Part 6: Managing Deployments (Web Interface)
+## Part 7: Managing Deployments (Web Interface)
 
 ### Viewing Deployment History
 
@@ -301,7 +333,7 @@ After successful setup, your branches will be accessible at:
    - **Pages not enabled**: Check Settings > Pages configuration
    - **File not found**: Ensure your HTML files exist in the branch
 
-## Part 7: Advanced Configuration Options
+## Part 8: Advanced Configuration Options
 
 ### Adding Environment Variables
 
@@ -324,16 +356,27 @@ After successful setup, your branches will be accessible at:
 ## Troubleshooting Common Issues
 
 ### Issue 1: Workflow Not Running
-**Solution**: Check that GitHub Actions is enabled in Settings > Actions
+**Solutions**: 
+- Check that GitHub Actions is enabled in Settings > Actions
+- **Verify workflow file exists in the branch you're pushing to**
+- Ensure folder name is `.github` (lowercase), not `.GitHub`
 
-### Issue 2: Permission Denied
+### Issue 2: "Branch is not allowed to deploy" Error
+**Solution**: Configure environment permissions in Settings > Environments > github-pages > Deployment branches
+
+### Issue 3: Permission Denied
 **Solution**: Verify workflow permissions are set to "Read and write permissions"
 
-### Issue 3: Pages Not Updating
+### Issue 4: Pages Not Updating
 **Solution**: Check that source is set to "GitHub Actions" in Settings > Pages
 
-### Issue 4: 404 Error on Branch URLs
-**Solution**: Ensure the branch has been pushed to and the workflow completed successfully
+### Issue 5: 404 Error on Branch URLs
+**Solutions**: 
+- Ensure the branch has been pushed to and the workflow completed successfully
+- Check that the workflow file exists in all branches (main, dev, test)
+
+### Issue 6: Workflow Only Works for Main Branch
+**Solution**: Copy the workflow file (`.github/workflows/deploy.yml`) to all branches using Pull Requests or manual copying
 
 ## Security Best Practices
 
